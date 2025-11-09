@@ -8,6 +8,10 @@ class GyroIndicator {
             return;
         }
 
+        this.ballVelocity = new THREE.Vector2(0, 0);
+        this.gravity = new THREE.Vector2(0, 0);
+        this.clock = new THREE.Clock();
+
         this.init();
         this.animate();
         this.setupGyro();
@@ -65,21 +69,18 @@ class GyroIndicator {
         // gamma: left-to-right tilt, in degrees, where right is positive
         const gamma = event.gamma; // Range: -90 to 90
         // beta: front-to-back tilt, in degrees, where front is positive
-        const beta = event.beta;   // Range: -180 to 180 (but typically -90 to 90 on phones)
+        const beta = event.beta;   // Range: -180 to 180
 
-        // Normalize tilts to a -1 to 1 range
-        let x = (gamma / 90); 
-        let y = (beta / 90);  
+        const gravityConstant = 9.8;
 
-        // Clamp to ensure they are within -1 and 1
-        x = Math.max(-1, Math.min(1, x));
-        y = Math.max(-1, Math.min(1, y));
+        // Convert degrees to radians
+        const gammaRad = THREE.MathUtils.degToRad(gamma);
+        const betaRad = THREE.MathUtils.degToRad(beta);
 
-        const max_dist = 1.7; // outer radius (2) - inner radius (0.3)
-
-        this.innerBall.position.x = x * max_dist;
-        this.innerBall.position.y = y * max_dist;
-        this.innerBall.position.z = 0; // Keep on the XY plane for clarity
+        // Update gravity vector based on device tilt.
+        // This vector represents the acceleration applied to the ball.
+        this.gravity.x = gravityConstant * Math.sin(gammaRad);
+        this.gravity.y = gravityConstant * Math.sin(betaRad);
     }
 
     setupGyro() {
@@ -105,6 +106,43 @@ class GyroIndicator {
 
     animate() {
         requestAnimationFrame(this.animate.bind(this));
+
+        const dt = this.clock.getDelta();
+        const damping = 0.98; // friction/air resistance
+        const max_dist = 1.7; // outer radius (2) - inner radius (0.3)
+
+        // Update velocity based on gravity (acceleration)
+        this.ballVelocity.x += this.gravity.x * dt;
+        this.ballVelocity.y += this.gravity.y * dt;
+
+        // Apply damping
+        this.ballVelocity.multiplyScalar(damping);
+
+        // Update position based on velocity
+        this.innerBall.position.x += this.ballVelocity.x * dt;
+        this.innerBall.position.y += this.ballVelocity.y * dt;
+
+        // Check for collision with the outer sphere
+        const distanceFromCenter = Math.sqrt(this.innerBall.position.x ** 2 + this.innerBall.position.y ** 2);
+        
+        if (distanceFromCenter > max_dist) {
+            // Normalize the position vector to get the direction from center
+            const normal = new THREE.Vector2(this.innerBall.position.x, this.innerBall.position.y).normalize();
+            
+            // Project velocity onto the normal vector
+            const projection = this.ballVelocity.dot(normal);
+            
+            // Reflect the velocity component that is along the normal (away from center)
+            if (projection > 0) {
+                const reflect = normal.multiplyScalar(-2 * projection);
+                this.ballVelocity.add(reflect);
+            }
+            
+            // Clamp position to be inside the sphere to prevent it from getting stuck outside
+            const clampedPosition = normal.multiplyScalar(max_dist);
+            this.innerBall.position.x = clampedPosition.x;
+            this.innerBall.position.y = clampedPosition.y;
+        }
 
         // Rotate the outer sphere for a dynamic effect
         this.outerSphere.rotation.x += 0.001;
